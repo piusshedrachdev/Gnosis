@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Class Extractor Settings</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      padding: 20px;
+      min-width: 320px;
+      max-width: 480px;
+    }
+    h3 { margin-top: 0; }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      box-sizing: border-box;
+      margin-bottom: 12px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    button {
+      padding: 8px 16px;
+      cursor: pointer;
+      border: none;
+      border-radius: 6px;
+      background: #0a84ff;
+      color: #fff;
+      font-size: 14px;
+    }
+    button:hover { background: #0060df; }
+    #status {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 0.9em;
+      display: none;
+    }
+    hr { margin: 20px 0; border: none; border-top: 1px solid #eee; }
+    h4 { margin: 0 0 8px; }
+    pre {
+      background: #f4f4f4;
+      padding: 10px;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow: auto;
+      font-size: 12px;
+      margin: 0;
+    }
+    #lastMeta {
+      font-size: 0.85em;
+      color: #666;
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <h3>Target Class Settings</h3>
+
+  <label for="className">CSS Class Name (without dot):</label>
+  <input type="text" id="className" placeholder="e.g., ds-markdown-paragraph">
+  <button id="save">Save Settings</button>
+
+  <div id="status"></div>
+
+  <hr>
+
+  <h4>Latest Extracted Value</h4>
+  <pre id="lastValue">(none yet)</pre>
+  <p id="lastMeta"></p>
+
+  <script src="options.js"></script>
+</body>
+</html>

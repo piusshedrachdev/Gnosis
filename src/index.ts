@@ -1,23 +1,18 @@
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import readline from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
+import express, { Request, Response } from "express";
+
 
 /*
  * ============================================================
  * CONFIGURATION
  * ============================================================
- *
- * CHANGE THIS PATH to wherever you extracted the Munim
- * Windows release.
- *
- * Example:
- *
- * C:\\Users\\Pius\\Downloads\\munim\\munim-computer-use.exe
- *
  */
 
+
 const MUNIM_PATH = "C:\\Users\\IKATEL TECHNOLOGY\\projects\\munim-computer-use.exe"
+
+const PORT = 3000;
 
 
 /*
@@ -26,8 +21,8 @@ const MUNIM_PATH = "C:\\Users\\IKATEL TECHNOLOGY\\projects\\munim-computer-use.e
  * ============================================================
  */
 
-const client = new Client({
-  name: "my-munim-client",
+const munim = new Client({
+  name: "munim-http-gateway",
   version: "1.0.0",
 });
 
@@ -46,39 +41,24 @@ async function connectToMunim() {
     args: [],
   });
 
-  await client.connect(transport);
+  await munim.connect(transport);
 
-  console.log("Connected to Munim.\n");
+  console.log("Connected to Munim.");
 }
 
 
 /*
  * ============================================================
- * LIST AVAILABLE TOOLS
+ * DISCOVER TOOLS
  * ============================================================
+ *
+ * We don't hard-code Munim's tools.
+ *
+ * Munim tells us what tools it currently exposes.
  */
 
-async function listTools() {
-  const result = await client.listTools();
-
-  console.log("\n================================");
-  console.log("AVAILABLE MUNIM TOOLS");
-  console.log("================================\n");
-
-  for (const tool of result.tools) {
-    console.log(`Tool: ${tool.name}`);
-
-    if (tool.description) {
-      console.log(`Description: ${tool.description}`);
-    }
-
-    console.log(
-      "Input schema:",
-      JSON.stringify(tool.inputSchema, null, 2)
-    );
-
-    console.log("--------------------------------\n");
-  }
+async function getTools() {
+  const result = await munim.listTools();
 
   return result.tools;
 }
@@ -86,163 +66,238 @@ async function listTools() {
 
 /*
  * ============================================================
- * CALL A MUNIM TOOL
+ * EXPRESS SERVER
  * ============================================================
  */
 
-async function callTool(
-  name: string,
-  args: Record<string, unknown>
-) {
-  console.log(`\nCalling: ${name}`);
-  console.log("Arguments:", args);
+const app = express();
 
-  const result = await client.callTool({
-    name,
-    arguments: args,
-  });
-
-  console.log("\nResult:");
-  console.dir(result, {
-    depth: null,
-  });
-
-  return result;
-}
+app.use(express.json());
 
 
 /*
  * ============================================================
- * INTERACTIVE CLI
+ * HEALTH CHECK
  * ============================================================
  */
 
-async function startCLI() {
-  const rl = readline.createInterface({
-    input,
-    output,
+app.get("/", (_req: Request, res: Response) => {
+  res.json({
+    status: "ok",
+    service: "Munim HTTP Gateway",
   });
-
-  console.log("\n================================");
-  console.log("       MUNIM COMPUTER CLIENT");
-  console.log("================================");
-
-  console.log(`
-Commands:
-
-  tools
-      List all Munim tools
-
-  call <tool>
-      Call a Munim tool
-
-  quit
-      Exit
-
-Examples:
-
-  tools
-
-  call screenshot
-
-  call get_app_state
-
-`);
-
-  while (true) {
-    const command = await rl.question("munim> ");
-
-    const trimmed = command.trim();
-
-    if (!trimmed) {
-      continue;
-    }
-
-    if (trimmed === "quit" || trimmed === "exit") {
-      break;
-    }
-
-    /*
-     * ----------------------------------------
-     * LIST TOOLS
-     * ----------------------------------------
-     */
-
-    if (trimmed === "tools") {
-      try {
-        await listTools();
-      } catch (error) {
-        console.error("Failed to list tools:", error);
-      }
-
-      continue;
-    }
+});
 
 
-    /*
-     * ----------------------------------------
-     * CALL TOOL
-     * ----------------------------------------
-     */
+/*
+ * ============================================================
+ * DISCOVER TOOLS
+ * ============================================================
+ *
+ * GET /tools
+ *
+ * Returns the tools currently exposed by Munim.
+ */
 
-    if (trimmed.startsWith("call ")) {
-      const toolName = trimmed
-        .substring("call ".length)
-        .trim();
+app.get("/tools", async (_req: Request, res: Response) => {
+  try {
+    const tools = await getTools();
 
-      try {
-        await callTool(toolName, {});
-      } catch (error) {
-        console.error(
-          "Tool call failed:",
-          error
-        );
-      }
+    res.json({
+      tools,
+    });
+  } catch (error) {
+    console.error("Failed to get tools:", error);
 
-      continue;
-    }
-
-
-    /*
-     * ----------------------------------------
-     * UNKNOWN COMMAND
-     * ----------------------------------------
-     */
-
-    console.log(
-      "Unknown command. Try: tools, call <tool>, quit"
-    );
+    res.status(500).json({
+      error: "Failed to discover Munim tools",
+    });
   }
-
-  rl.close();
-}
+});
 
 
 /*
  * ============================================================
- * MAIN
+ * CALL ANY TOOL
+ * ============================================================
+ *
+ * POST /tools/:name
+ *
+ * Example:
+ *
+ * POST /tools/screenshot
+ *
+ * {
+ *   "arguments": {}
+ * }
+ *
+ *
+ * Another example:
+ *
+ * POST /tools/type_text
+ *
+ * {
+ *   "arguments": {
+ *     "text": "Hello world"
+ *   }
+ * }
+ *
+ * We don't need separate routes for these tools.
+ */
+
+app.post(
+  "/tools/:name",
+  async (req: Request, res: Response) => {
+    const toolName = req.params.name;
+
+    try {
+      /*
+       * Get the current tools from Munim.
+       */
+      const tools = await getTools();
+
+      /*
+       * Check that the requested tool actually exists.
+       */
+      const tool = tools.find(
+        (tool) => tool.name === toolName
+      );
+
+      if (!tool) {
+        return res.status(404).json({
+          error: `Tool "${toolName}" was not found`,
+          availableTools: tools.map(
+            (tool) => tool.name
+          ),
+        });
+      }
+
+
+      /*
+       * Get arguments from the HTTP request.
+       *
+       * Expected request:
+       *
+       * {
+       *   "arguments": {
+       *      ...
+       *   }
+       * }
+       */
+
+      const toolArguments =
+        req.body?.arguments ?? {};
+      console.log(req.body)
+
+
+      /*
+       * Call Munim through MCP.
+       */
+
+      console.log(
+        `Calling Munim tool: ${toolName}`
+      );
+
+      console.log(
+        "Arguments:",
+        toolArguments
+      );
+
+
+      const result = await munim.callTool({
+        name: toolName,
+        arguments: toolArguments,
+      });
+
+
+      /*
+       * Return Munim's result directly
+       * to the HTTP client.
+       */
+
+      res.json(result);
+
+    } catch (error) {
+
+      console.error(
+        `Failed to call tool "${toolName}":`,
+        error
+      );
+
+      res.status(500).json({
+        error: `Failed to execute tool "${toolName}"`,
+        details:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      });
+    }
+  }
+);
+
+
+/*
+ * ============================================================
+ * START SERVER
  * ============================================================
  */
 
 async function main() {
   try {
+
+    /*
+     * First connect to Munim.
+     */
+
     await connectToMunim();
 
-    await listTools();
 
-    await startCLI();
+    /*
+     * Discover tools once at startup
+     * just so we can display them.
+     */
 
-    await client.close();
+    const tools = await getTools();
 
-    console.log("Munim client closed.");
+    console.log("\nMunim tools:");
+
+    for (const tool of tools) {
+      console.log(`  - ${tool.name}`);
+    }
+
+
+    /*
+     * Start HTTP server.
+     */
+
+    app.listen(PORT, () => {
+
+      console.log(
+        `\nHTTP server running at http://localhost:${PORT}`
+      );
+
+      console.log(
+        `Tool discovery: http://localhost:${PORT}/tools`
+      );
+
+    });
+
   } catch (error) {
-    console.error("\nFailed to start Munim client.");
 
-    console.error(error);
+    console.error(
+      "Failed to start server:",
+      error
+    );
 
     process.exit(1);
   }
 }
 
+
+/*
+ * ============================================================
+ * START APPLICATION
+ * ============================================================
+ */
 
 main();

@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Class Value Extractor",
+  "version": "1.0",
+  "description": "Extracts text from a user-specified class after DOM changes stop.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "Class Value Extractor",
+    "default_popup": "options.html"
+  }
+}

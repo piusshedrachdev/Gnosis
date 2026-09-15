@@ -19,8 +19,14 @@ const ajv = new Ajv({
 
 addFormats(ajv);
 
-/** Cache compiled validators per capability name. */
-const validatorCache = new Map<string, ValidateFunction>();
+/**
+ * Cache compiled validators keyed by a stable hash of the schema.
+ *
+ * Keying by capability *name* is unsafe because a provider may re-discover the
+ * same capability with a different schema. Keying by the serialized schema also
+ * keeps validation correct for tests that reuse capability names.
+ */
+const validatorCache = new Map<string, ValidateFunction | null>();
 
 /** Error thrown when capability arguments fail schema validation. */
 export class CapabilityValidationError extends Error {
@@ -34,22 +40,52 @@ export class CapabilityValidationError extends Error {
   }
 }
 
+/**
+ * Decide whether a schema is trivially permissive and can be skipped.
+ *
+ * A schema is treated as "anything goes" when it is missing, is not an object,
+ * is an empty object, or is `{ type: "object" }` with no properties/constraints.
+ */
+function isPermissiveSchema(schema: unknown): boolean {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return true;
+  }
+
+  const keys = Object.keys(schema as Record<string, unknown>);
+  if (keys.length === 0) return true;
+
+  const record = schema as Record<string, unknown>;
+  const onlyType = keys.length === 1 && keys[0] === "type";
+  if (onlyType && record.type === "object") return true;
+
+  const noConstraints =
+    keys.every((key) =>
+      ["$schema", "$id", "title", "description", "type", "default"].includes(
+        key
+      )
+    ) && record.type === "object";
+
+  return noConstraints;
+}
+
 function getValidator(
   capability: CapabilityDefinition
 ): ValidateFunction | undefined {
-  const cached = validatorCache.get(capability.name);
-  if (cached) return cached;
-
   const schema = capability.inputSchema;
 
-  // A schema with no explicit type/properties accepts anything.
-  if (!schema || Object.keys(schema).length === 0) {
+  if (isPermissiveSchema(schema)) {
     return undefined;
+  }
+
+  const cacheKey = JSON.stringify(schema);
+  const cached = validatorCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached ?? undefined;
   }
 
   try {
     const validator = ajv.compile(schema);
-    validatorCache.set(capability.name, validator);
+    validatorCache.set(cacheKey, validator);
     return validator;
   } catch (error) {
     // A provider may return a schema Ajv cannot compile. Treat the capability
@@ -58,6 +94,7 @@ function getValidator(
       `Could not compile schema for capability "${capability.name}":`,
       error instanceof Error ? error.message : error
     );
+    validatorCache.set(cacheKey, null);
     return undefined;
   }
 }

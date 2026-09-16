@@ -6,8 +6,8 @@
     body {
       font-family: system-ui, sans-serif;
       padding: 20px;
-      min-width: 320px;
-      max-width: 480px;
+      min-width: 340px;
+      max-width: 520px;
     }
     h3 { margin-top: 0; }
     label {
@@ -24,6 +24,13 @@
       border-radius: 6px;
       font-size: 14px;
     }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .row > label { margin: 0; font-weight: 500; }
     button {
       padding: 8px 16px;
       cursor: pointer;
@@ -34,6 +41,25 @@
       font-size: 14px;
     }
     button:hover { background: #0060df; }
+    button:disabled {
+      background: #b9b9b9;
+      cursor: not-allowed;
+    }
+    #stop {
+      background: #ff3b30;
+    }
+    #stop:hover { background: #d70015; }
+    #state {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      background: #eee;
+      color: #555;
+    }
+    #state.running { background: #e5f7e5; color: #060; }
+    #state.waiting { background: #fff4e5; color: #8a5300; }
     #status {
       margin-top: 12px;
       padding: 10px 12px;
@@ -53,19 +79,51 @@
       font-size: 12px;
       margin: 0;
     }
-    #lastMeta {
+    #lastMeta, #parseReport {
       font-size: 0.85em;
       color: #666;
       margin-top: 6px;
     }
+    #parseReport.error { color: #a00; }
+    #parseReport.ok { color: #060; }
+    .hint {
+      font-size: 0.8em;
+      color: #777;
+      margin: -6px 0 12px;
+    }
   </style>
 </head>
 <body>
-  <h3>Target Class Settings</h3>
+  <h3>Extraction &amp; Injection Settings</h3>
 
-  <label for="className">CSS Class Name (without dot):</label>
-  <input type="text" id="className" placeholder="e.g., ds-markdown-paragraph">
-  <button id="save">Save Settings</button>
+  <div class="row">
+    <span>Status:</span>
+    <span id="state" class="waiting">waiting</span>
+  </div>
+
+  <h4>1. Extract from (source)</h4>
+  <div class="row">
+    <label><input type="radio" name="selectorType" value="class" checked> Class</label>
+    <label><input type="radio" name="selectorType" value="id"> ID</label>
+  </div>
+
+  <label for="selectorValue">Element class or id to read:</label>
+  <input type="text" id="selectorValue" placeholder="e.g., ds-markdown-paragraph or my-element-id">
+
+  <h4>2. Inject into (destination)</h4>
+  <div class="row">
+    <label><input type="radio" name="injectType" value="class" checked> Class</label>
+    <label><input type="radio" name="injectType" value="id"> ID</label>
+  </div>
+
+  <label for="injectValue">Class or id of the container holding a textarea:</label>
+  <input type="text" id="injectValue" placeholder="e.g., chat-input or my-composer-id">
+  <p class="hint">The extension finds this container and writes into the &lt;textarea&gt; inside it.</p>
+
+  <div class="row">
+    <button id="start">Start</button>
+    <button id="stop" disabled>Stop</button>
+  </div>
 
   <div id="status"></div>
 
@@ -74,6 +132,7 @@
   <h4>Latest Extracted Value</h4>
   <pre id="lastValue">(none yet)</pre>
   <p id="lastMeta"></p>
+  <p id="parseReport"></p>
 
   <script src="options.js"></script>
 </body>

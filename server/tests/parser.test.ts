@@ -41,10 +41,10 @@ describe("ExtractorParser.parseExtraction", () => {
     expect(result.ok).toBe(true);
     expect(result.errors).toEqual([]);
     expect(result.payload).not.toBeNull();
-    expect(result.payload!.capability).toBe("computer.report_extracted_value");
+    // Must be a capability the runtime actually registers, not a made-up one.
+    expect(result.payload!.capability).toBe("computer.type_text");
     expect(result.payload!.arguments).toEqual({
-      className: "message",
-      value: "Hello world",
+      text: "Hello world",
     });
   });
 
@@ -82,8 +82,8 @@ describe("ExtractorParser.parseExtraction", () => {
 describe("ExtractorParser.validatePayload", () => {
   it("accepts a payload with capability and arguments", () => {
     const result = Parser.validatePayload({
-      capability: "computer.report_extracted_value",
-      arguments: { className: "a", value: "b" },
+      capability: "computer.type_text",
+      arguments: { text: "b" },
     });
     expect(result.ok).toBe(true);
     expect(result.report).toMatch(/OK/i);
@@ -112,7 +112,7 @@ describe("ExtractorParser.validatePayload", () => {
 
   it("rejects a non-object arguments field", () => {
     const result = Parser.validatePayload({
-      capability: "computer.report_extracted_value",
+      capability: "computer.type_text",
       arguments: [1, 2, 3],
     });
     expect(result.ok).toBe(false);
@@ -131,10 +131,10 @@ describe("ExtractorParser.validatePayload", () => {
 
   it("rejects arguments that violate the known schema", () => {
     const result = Parser.validatePayload({
-      capability: "computer.report_extracted_value",
-      arguments: { className: "a" }, // missing required "value"
+      capability: "computer.type_text",
+      arguments: {}, // missing required "text"
     });
     expect(result.ok).toBe(false);
-    expect(result.errors.join(" ")).toMatch(/value.*required/i);
+    expect(result.errors.join(" ")).toMatch(/text.*required/i);
   });
 });

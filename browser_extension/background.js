@@ -1,24 +1,26 @@
-importScripts('parser.js', 'capability_prompt.js');
+importScripts('selector.js', 'parser.js', 'capability_prompt.js');
 
 /**
  * Background service worker.
  *
- * Flow:
- *   content.js  --CLASS_VALUE_EXTRACTED-->  background
+ * Flow (only active after the user clicks Start on the options page):
+ *
+ *   options  --EXTRACTOR_START-->  content.js  (arms the observer)
+ *   content  --CLASS_VALUE_EXTRACTED-->  background
  *                                              |
  *                                    ExtractorParser.parseExtraction()
  *                                              |
  *                          ok? forward to /execute : report mismatch
  *
- * The parser decides whether the extracted data matches what the server's
- * /execute endpoint needs. If it does, we forward the payload to the server.
- * If it does not, we surface a precise mismatch report instead of sending
- * garbage.
+ * While the session is idle (extractorRunning === false), extractions are
+ * ignored so nothing is parsed or forwarded until the user starts a session.
  */
 
 const EXECUTE_URL = 'http://localhost:3000/execute';
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!message || typeof message !== 'object') return false;
+
   if (message.type === 'CLASS_VALUE_EXTRACTED') {
     handleExtraction(message);
     return false;
@@ -32,15 +34,53 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  // Options page asks us to write the capability prompt into the destination
+  // element as soon as a session starts.
+  if (message.type === 'EXTRACTOR_INJECT_PROMPT') {
+    injectPromptIntoPage()
+      .then((ok) => sendResponse({ ok }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
+
   return false;
 });
 
 /**
- * Parse and, if valid, forward an extraction.
+ * Build the capability-discovery prompt and inject it into the destination
+ * element of the active tab. Used on Start so the agent sees the prompt
+ * immediately, before any extraction happens.
+ */
+async function injectPromptIntoPage() {
+  const prompt = CapabilityPrompt.buildCapabilityPrompt({
+    baseUrl: 'http://localhost:3000'
+  });
+
+  const ok = await injectIntoPage(prompt);
+  await chrome.storage.local.set({ lastInjectedPrompt: ok, lastInjectedAt: Date.now() });
+
+  if (ok) {
+    console.log('[Class Extractor] Capability prompt injected into destination.');
+  } else {
+    console.warn('[Class Extractor] Could not inject capability prompt (destination element missing?).');
+  }
+
+  return ok;
+}
+
+/**
+ * Parse and, if valid and a session is running, forward an extraction.
  */
 async function handleExtraction(message) {
+  // Ignore stray extractions when no session is active.
+  const state = await chrome.storage.local.get({ extractorRunning: false });
+  if (!state.extractorRunning) {
+    console.log('[Class Extractor] Ignoring extraction; no active session.');
+    return;
+  }
+
   const extraction = {
-    className: message.className,
+    className: message.selectorValue || message.className,
     value: message.value
   };
 
@@ -49,7 +89,6 @@ async function handleExtraction(message) {
 
   console.log('[Class Extractor] Parser report:', parsed.report);
 
-  // Always persist the latest extraction for the UI.
   await chrome.storage.local.set({
     lastValue: extraction.value,
     lastClassName: extraction.className,
@@ -96,12 +135,57 @@ async function handleExtraction(message) {
     } else {
       console.log('[Class Extractor] /execute ok:', result);
     }
+
+    // 3. Write the API response back into the configured destination element.
+    await injectIntoPage(formatResponse(result));
   } catch (error) {
-    // Network/server unreachable — still a valid payload, just not delivered.
     await chrome.storage.local.set({
       lastExecuteOk: false,
       lastExecuteError: error instanceof Error ? error.message : String(error)
     });
     console.warn('[Class Extractor] Failed to reach /execute:', error);
+
+    // Surface the failure into the destination element too, when possible.
+    await injectIntoPage(
+      'ERROR: ' + (error instanceof Error ? error.message : String(error))
+    );
+  }
+}
+
+/**
+ * Send text to the active tab's content script for injection into the
+ * configured destination element. Safe no-op if there is no active tab or
+ * the destination is not present.
+ */
+async function injectIntoPage(text) {
+  if (typeof text !== 'string' || !text) return false;
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.id) return false;
+
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: 'EXTRACTOR_INJECT',
+      text
+    });
+
+    return Boolean(response && response.ok);
+  } catch (error) {
+    // Content script may be absent on restricted pages; not fatal.
+    console.warn('[Class Extractor] Injection skipped:', error);
+    return false;
+  }
+}
+
+/**
+ * Render an /execute result (or the capability prompt) as injectable text.
+ */
+function formatResponse(result) {
+  if (result === null || result === undefined) return '';
+  if (typeof result === 'string') return result;
+  try {
+    return JSON.stringify(result, null, 2);
+  } catch (e) {
+    return String(result);
   }
 }

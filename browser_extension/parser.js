@@ -36,20 +36,40 @@
   };
 
   // Capability names this extension knows how to produce payloads for.
-  // Kept intentionally small and explicit; the agent can discover the rest
-  // from the server via capabilities.list / capabilities.describe.
+  //
+  // IMPORTANT: these MUST correspond to capabilities the Agent Runtime
+  // actually registers. The runtime derives its capability names from the
+  // Munim MCP tools as `<prefix>.<tool_name>` (e.g. "computer.type_text",
+  // "computer.click", "computer.browser_type"). There is no
+  // "report_extracted_value" tool, so sending that name yields
+  // CAPABILITY_NOT_FOUND.
+  //
+  // The extractor's job is to hand extracted text to a real computer-use
+  // capability, so we default to `computer.type_text`, whose schema requires
+  // a `text` field.
   const CAPABILITY_SCHEMAS = {
-    // Example capability: report a scraped/extracted value to the runtime.
-    // The schema mirrors the JSON-Schema style used by the MCP provider.
-    'computer.report_extracted_value': {
+    // Type extracted text into the focused element via Munim's type_text tool.
+    'computer.type_text': {
       type: 'object',
       properties: {
-        className: { type: 'string' },
-        value: { type: 'string' }
+        text: { type: 'string' },
+        element_id: { type: 'string' }
       },
-      required: ['className', 'value']
+      required: ['text']
+    },
+    // Type extracted text into one of the agent's browser tabs.
+    'computer.browser_type': {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'integer' },
+        text: { type: 'string' }
+      },
+      required: ['tab_id', 'text']
     }
   };
+
+  // Default capability used when building a payload from a raw extraction.
+  const DEFAULT_CAPABILITY = 'computer.type_text';
 
   // ---- Small helpers -----------------------------------------------------
 
@@ -116,17 +136,38 @@
   /**
    * Turn a raw extraction message into a candidate /execute payload.
    *
-   * @param {{className:string, value:string}} extraction
+   * Uses a capability the runtime actually registers. The extracted text is
+   * sent as the `text` argument of `computer.type_text`, which types it into
+   * the focused element via Munim.
+   *
+   * @param {{className?:string, value:string}} extraction
+   * @param {string} [capability] Override the default capability name.
    * @returns {{capability:string, arguments:object}}
    */
-  function buildPayload(extraction) {
-    return {
-      capability: 'computer.report_extracted_value',
-      arguments: {
-        className: (extraction && extraction.className) || '',
-        value: (extraction && extraction.value) || ''
-      }
-    };
+  function buildPayload(extraction, capability) {
+    const cap = typeof capability === 'string' && capability
+      ? capability
+      : DEFAULT_CAPABILITY;
+
+    const value = (extraction && extraction.value) || '';
+
+    // Map the extraction onto the chosen capability's real argument schema.
+    if (cap === 'computer.browser_type') {
+      return {
+        capability: cap,
+        arguments: {
+          tab_id: extraction && Number.isInteger(extraction.tabId) ? extraction.tabId : 0,
+          text: value
+        }
+      };
+    }
+
+    // Default: computer.type_text -> { text, element_id? }
+    const args = { text: value };
+    if (extraction && extraction.elementId) {
+      args.element_id = extraction.elementId;
+    }
+    return { capability: cap, arguments: args };
   }
 
   // ---- Core: validate a payload against the API contract -----------------
@@ -247,6 +288,7 @@
   const Parser = {
     EXECUTE_CONTRACT,
     CAPABILITY_SCHEMAS,
+    DEFAULT_CAPABILITY,
     buildPayload,
     validatePayload,
     parseExtraction

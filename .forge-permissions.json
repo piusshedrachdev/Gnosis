@@ -1,0 +1,5 @@
+{
+  "alwaysAllow": [
+    "file_write"
+  ]
+}

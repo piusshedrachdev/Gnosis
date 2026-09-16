@@ -1,15 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Class Value Extractor",
-  "version": "1.0",
-  "description": "Extracts text from a user-specified class after DOM changes stop.",
+  "version": "1.1",
+  "description": "Extracts text from a user-specified class after DOM changes stop, validates it against the Agent Runtime /execute contract, and forwards it when it matches.",
   "permissions": [
     "storage",
     "activeTab",
     "scripting"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "http://localhost:3000/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -17,8 +18,14 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "js": ["parser.js", "content.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["parser.js", "capability_prompt.js"],
+      "matches": ["<all_urls>"]
     }
   ],
   "options_ui": {

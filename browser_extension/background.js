@@ -102,13 +102,23 @@ async function handleExtraction(message) {
   const short = (extraction.value || '').trim().slice(0, 4) || '✓';
 
   if (!parsed.ok) {
-    // Mismatch: report, do NOT send to the server.
+    // Not a capability call (or invalid arguments): report, do NOT send to the
+    // server and do NOT inject anything into the destination element.
+    const isToolCall = !/^NOT_A_TOOL_CALL/.test(parsed.report || '');
+
     chrome.action.setBadgeText({ text: '!' });
     chrome.action.setBadgeBackgroundColor({ color: '#ff3b30' });
-    console.warn(
-      '[Class Extractor] Extracted data does NOT match /execute contract:',
-      parsed.errors
-    );
+
+    if (isToolCall) {
+      console.warn(
+        '[Class Extractor] Extracted capability call has invalid arguments:',
+        parsed.errors
+      );
+    } else {
+      console.log(
+        '[Class Extractor] Extracted text is not a tool call; nothing sent or injected.'
+      );
+    }
     return;
   }
 

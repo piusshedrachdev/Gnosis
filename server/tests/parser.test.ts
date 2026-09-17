@@ -23,33 +23,62 @@ interface ParseResult {
 const Parser = require(parserPath) as {
   EXECUTE_CONTRACT: unknown;
   CAPABILITY_SCHEMAS: Record<string, unknown>;
-  DEFAULT_CAPABILITY: string;
-  buildPayload: (
-    e: { className?: string; value: string },
-    capability?: string
-  ) => {
+  CAPABILITY_PREFIX: string;
+  META_CAPABILITIES: string[];
+  isKnownCapabilityName: (n: unknown) => boolean;
+  tryParseCapabilityCall: (t: string) => {
     capability: string;
     arguments: Record<string, unknown>;
+  } | null;
+  buildPayload: (e: { className?: string; value: string }) => {
+    ok: boolean;
+    call: { capability: string; arguments: Record<string, unknown> } | null;
+    reason: string;
   };
   validatePayload: (p: unknown) => ParseResult;
   parseExtraction: (e: unknown) => ParseResult;
 };
 
 describe("ExtractorParser.parseExtraction", () => {
-  it("accepts a well-formed extraction and builds a valid payload", () => {
+  it("accepts a well-formed capability-call extraction", () => {
     const result = Parser.parseExtraction({
       className: "message",
-      value: "Hello world",
+      value: '{ "capability": "computer.type_text", "arguments": { "text": "Hello" } }',
     });
 
     expect(result.ok).toBe(true);
     expect(result.errors).toEqual([]);
     expect(result.payload).not.toBeNull();
-    // Must be a capability the runtime actually registers, not a made-up one.
     expect(result.payload!.capability).toBe("computer.type_text");
-    expect(result.payload!.arguments).toEqual({
-      text: "Hello world",
+    expect(result.payload!.arguments).toEqual({ text: "Hello" });
+  });
+
+  it("REJECTS free-form text that is not a tool call", () => {
+    const result = Parser.parseExtraction({
+      className: "message",
+      value: "Hello world, this is just normal chat text.",
     });
+    expect(result.ok).toBe(false);
+    expect(result.payload).toBeNull();
+    expect(result.report).toMatch(/NOT_A_TOOL_CALL/);
+  });
+
+  it("REJECTS an unknown/invented capability name", () => {
+    const result = Parser.parseExtraction({
+      className: "message",
+      value: '{ "capability": "computer.do_magic", "arguments": {} }',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/Unknown capability/i);
+  });
+
+  it("tolerates surrounding prose around a valid capability call", () => {
+    const result = Parser.parseExtraction({
+      className: "message",
+      value: 'Sure, here you go: { "capability": "computer.click", "arguments": { "element_id": "e12" } } done.',
+    });
+    expect(result.ok).toBe(true);
+    expect(result.payload!.capability).toBe("computer.click");
   });
 
   it("rejects a missing extraction", () => {
@@ -143,35 +172,75 @@ describe("ExtractorParser.validatePayload", () => {
   });
 });
 
-describe("ExtractorParser capability selection (real runtime capabilities)", () => {
-  it("does not use the non-existent report_extracted_value capability", () => {
-    const result = Parser.parseExtraction({ className: "x", value: "hello" });
-    expect(result.ok).toBe(true);
-    expect(result.payload!.capability).not.toBe("computer.report_extracted_value");
-  });
-
-  it("defaults to computer.type_text (a real Munim capability)", () => {
-    expect(Parser.DEFAULT_CAPABILITY).toBe("computer.type_text");
-    const payload = Parser.buildPayload({ className: "x", value: "hi" });
-    expect(payload.capability).toBe("computer.type_text");
-    expect(payload.arguments).toEqual({ text: "hi" });
-  });
-
-  it("supports computer.browser_type with a tab_id", () => {
-    const payload = Parser.buildPayload(
-      { className: "x", value: "hi", tabId: 7 },
-      "computer.browser_type"
-    );
-    expect(payload.capability).toBe("computer.browser_type");
-    expect(payload.arguments).toEqual({ tab_id: 7, text: "hi" });
-  });
-
-  it("includes element_id for computer.type_text when provided", () => {
-    const payload = Parser.buildPayload({
+describe("ExtractorParser.buildPayload gating (tool-call only)", () => {
+  it("accepts a bare capability call", () => {
+    const built = Parser.buildPayload({
       className: "x",
-      value: "hi",
-      elementId: "e12",
+      value: '{ "capability": "computer.type_text", "arguments": { "text": "hi" } }',
     });
-    expect(payload.arguments).toEqual({ text: "hi", element_id: "e12" });
+    expect(built.ok).toBe(true);
+    expect(built.call.capability).toBe("computer.type_text");
+    expect(built.call.arguments).toEqual({ text: "hi" });
+  });
+
+  it("accepts a { tool: {...} } wrapper", () => {
+    const built = Parser.buildPayload({
+      className: "x",
+      value: '{ "tool": { "capability": "computer.click", "arguments": {} } }',
+    });
+    expect(built.ok).toBe(true);
+    expect(built.call.capability).toBe("computer.click");
+  });
+
+  it("rejects free-form text", () => {
+    const built = Parser.buildPayload({ className: "x", value: "just talking" });
+    expect(built.ok).toBe(false);
+    expect(built.call).toBeNull();
+  });
+
+  it("rejects an unknown capability name", () => {
+    const built = Parser.buildPayload({
+      className: "x",
+      value: '{ "capability": "computer.nope", "arguments": {} }',
+    });
+    expect(built.ok).toBe(false);
+    expect(built.reason).toMatch(/Unknown capability/i);
+  });
+
+  it("rejects invalid JSON", () => {
+    const built = Parser.buildPayload({
+      className: "x",
+      value: '{ "capability": "computer.click", }',
+    });
+    expect(built.ok).toBe(false);
+  });
+
+  it("rejects arguments that are not an object", () => {
+    const built = Parser.buildPayload({
+      className: "x",
+      value: '{ "capability": "computer.click", "arguments": "e12" }',
+    });
+    expect(built.ok).toBe(false);
+  });
+});
+
+describe("ExtractorParser.isKnownCapabilityName", () => {
+  it("accepts capabilities we hold a schema for", () => {
+    expect(Parser.isKnownCapabilityName("computer.type_text")).toBe(true);
+    expect(Parser.isKnownCapabilityName("computer.click")).toBe(true);
+  });
+
+  it("accepts runtime meta-capabilities", () => {
+    expect(Parser.isKnownCapabilityName("capabilities.list")).toBe(true);
+    expect(Parser.isKnownCapabilityName("capabilities.describe")).toBe(true);
+  });
+
+  it("rejects invented computer.* names", () => {
+    expect(Parser.isKnownCapabilityName("computer.do_magic")).toBe(false);
+  });
+
+  it("rejects empty or unrelated names", () => {
+    expect(Parser.isKnownCapabilityName("")).toBe(false);
+    expect(Parser.isKnownCapabilityName("do_thing")).toBe(false);
   });
 });

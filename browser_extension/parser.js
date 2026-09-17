@@ -47,8 +47,11 @@
   // The extractor's job is to hand extracted text to a real computer-use
   // capability, so we default to `computer.type_text`, whose schema requires
   // a `text` field.
+  // Schemas for the capabilities this extension can recognise inside an
+  // extracted agent reply. The runtime derives its names from the Munim MCP
+  // tools as `<prefix>.<tool_name>`. These mirror the real tool schemas so a
+  // reply can be validated locally before it is forwarded.
   const CAPABILITY_SCHEMAS = {
-    // Type extracted text into the focused element via Munim's type_text tool.
     'computer.type_text': {
       type: 'object',
       properties: {
@@ -57,7 +60,6 @@
       },
       required: ['text']
     },
-    // Type extracted text into one of the agent's browser tabs.
     'computer.browser_type': {
       type: 'object',
       properties: {
@@ -65,11 +67,74 @@
         text: { type: 'string' }
       },
       required: ['tab_id', 'text']
+    },
+    'computer.click': {
+      type: 'object',
+      properties: {
+        element_id: { type: 'string' },
+        x: { type: 'number' },
+        y: { type: 'number' },
+        click_count: { type: 'integer' }
+      },
+      required: []
+    },
+    'computer.press_key': {
+      type: 'object',
+      properties: {
+        key: { type: 'string' },
+        modifiers: { type: 'array' }
+      },
+      required: ['key']
+    },
+    'computer.scroll': {
+      type: 'object',
+      properties: {
+        amount: { type: 'number' },
+        direction: { type: 'string' }
+      },
+      required: []
+    },
+    'computer.browser_snapshot': {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'integer' }
+      },
+      required: ['tab_id']
+    },
+    'computer.browser_navigate': {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'integer' },
+        url: { type: 'string' }
+      },
+      required: ['tab_id', 'url']
+    },
+    'computer.browser_click': {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'integer' },
+        element_index: { type: 'integer' }
+      },
+      required: ['tab_id']
+    },
+    // Runtime meta-capabilities (handled by the runtime itself).
+    'capabilities.list': {
+      type: 'object',
+      properties: {},
+      required: []
+    },
+    'capabilities.describe': {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name']
     }
   };
 
-  // Default capability used when building a payload from a raw extraction.
-  const DEFAULT_CAPABILITY = 'computer.type_text';
+  // Prefix that every provider capability must start with.
+  const CAPABILITY_PREFIX = 'computer.';
+
+  // Meta-capabilities are owned by the runtime, not a provider.
+  const META_CAPABILITIES = ['capabilities.list', 'capabilities.describe'];
 
   // ---- Small helpers -----------------------------------------------------
 
@@ -131,43 +196,144 @@
     return problems;
   }
 
-  // ---- Core: build candidate payloads from an extraction -----------------
+  // ---- Core: parse an extracted agent reply as a capability call ----------
 
   /**
-   * Turn a raw extraction message into a candidate /execute payload.
+   * Extract the first balanced JSON object from a string.
    *
-   * Uses a capability the runtime actually registers. The extracted text is
-   * sent as the `text` argument of `computer.type_text`, which types it into
-   * the focused element via Munim.
+   * The agent may wrap its reply in prose or markdown fences; we look for the
+   * first '{' and scan for the matching '}' (respecting strings/escapes) so we
+   * can tolerate surrounding text.
+   *
+   * @param {string} text
+   * @returns {string|null}
+   */
+  function extractJsonObject(text) {
+    if (typeof text !== 'string') return null;
+
+    const start = text.indexOf('{');
+    if (start === -1) return null;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start; i < text.length; i += 1) {
+      const ch = text[i];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === '\\') {
+          escaped = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+      } else if (ch === '{') {
+        depth += 1;
+      } else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          return text.slice(start, i + 1);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Try to interpret extracted text as a capability call.
+   *
+   * Accepts either:
+   *   - a bare capability call: { "capability": "...", "arguments": {...} }
+   *   - an /execute wrapper:    { "tool": {...} }  (tolerated, unwrapped)
+   *
+   * Returns the parsed object or null when the text is not a capability call.
+   * This is the GATE: free-form text (normal chat, prose) returns null and must
+   * NOT be executed or injected.
+   *
+   * @param {string} text
+   * @returns {{capability:string, arguments:object}|null}
+   */
+  function tryParseCapabilityCall(text) {
+    const jsonText = extractJsonObject(text);
+    if (!jsonText) return null;
+
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch (e) {
+      return null;
+    }
+
+    if (!isPlainObject(parsed)) return null;
+
+    // Tolerate an {"tool": {...}} wrapper.
+    if (isPlainObject(parsed.tool)) {
+      parsed = parsed.tool;
+    }
+
+    if (!isNonEmptyString(parsed.capability)) return null;
+
+    const args = parsed.arguments;
+    if (args !== undefined && !isPlainObject(args)) return null;
+
+    return {
+      capability: parsed.capability,
+      arguments: args || {}
+    };
+  }
+
+  /**
+   * True when a capability name is one this extension can vouch for: it must
+   * be a runtime meta-capability or a capability we hold a schema for. We do
+   * NOT accept arbitrary `computer.*` names, because an invented name would be
+   * rejected by the runtime with CAPABILITY_NOT_FOUND — the gate must catch it
+   * here so nothing invalid is executed or injected.
+   *
+   * @param {string} name
+   * @returns {boolean}
+   */
+  function isKnownCapabilityName(name) {
+    if (!isNonEmptyString(name)) return false;
+    if (META_CAPABILITIES.indexOf(name) !== -1) return true;
+    return Object.prototype.hasOwnProperty.call(CAPABILITY_SCHEMAS, name);
+  }
+
+  /**
+   * Turn a raw extraction message into a candidate /execute payload, but ONLY
+   * when the extracted text is a well-formed capability call.
    *
    * @param {{className?:string, value:string}} extraction
-   * @param {string} [capability] Override the default capability name.
-   * @returns {{capability:string, arguments:object}}
+   * @returns {{ok:boolean, call:object|null, reason:string}}
    */
-  function buildPayload(extraction, capability) {
-    const cap = typeof capability === 'string' && capability
-      ? capability
-      : DEFAULT_CAPABILITY;
-
+  function buildPayload(extraction) {
     const value = (extraction && extraction.value) || '';
 
-    // Map the extraction onto the chosen capability's real argument schema.
-    if (cap === 'computer.browser_type') {
+    const call = tryParseCapabilityCall(value);
+    if (!call) {
       return {
-        capability: cap,
-        arguments: {
-          tab_id: extraction && Number.isInteger(extraction.tabId) ? extraction.tabId : 0,
-          text: value
-        }
+        ok: false,
+        call: null,
+        reason: 'Extracted text is not a capability call (no valid { capability, arguments } JSON found).'
       };
     }
 
-    // Default: computer.type_text -> { text, element_id? }
-    const args = { text: value };
-    if (extraction && extraction.elementId) {
-      args.element_id = extraction.elementId;
+    if (!isKnownCapabilityName(call.capability)) {
+      return {
+        ok: false,
+        call: null,
+        reason: 'Unknown capability name: "' + call.capability + '".'
+      };
     }
-    return { capability: cap, arguments: args };
+
+    return { ok: true, call, reason: 'Capability call recognised.' };
   }
 
   // ---- Core: validate a payload against the API contract -----------------
@@ -280,7 +446,19 @@
       };
     }
 
-    return validatePayload(buildPayload(extraction));
+    // GATE: only proceed when the extracted text is a capability call.
+    const built = buildPayload(extraction);
+    if (!built.ok) {
+      return {
+        ok: false,
+        payload: null,
+        errors: [built.reason],
+        warnings: [],
+        report: 'NOT_A_TOOL_CALL: ' + built.reason
+      };
+    }
+
+    return validatePayload(built.call);
   }
 
   // ---- Export ------------------------------------------------------------
@@ -288,7 +466,11 @@
   const Parser = {
     EXECUTE_CONTRACT,
     CAPABILITY_SCHEMAS,
-    DEFAULT_CAPABILITY,
+    CAPABILITY_PREFIX,
+    META_CAPABILITIES,
+    tryParseCapabilityCall,
+    extractJsonObject,
+    isKnownCapabilityName,
     buildPayload,
     validatePayload,
     parseExtraction

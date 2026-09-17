@@ -56,7 +56,8 @@ async function injectPromptIntoPage() {
     baseUrl: 'http://localhost:3000'
   });
 
-  const ok = await injectIntoPage(prompt);
+  // Prompt replaces any prior content so the agent starts from a clean slate.
+  const ok = await injectIntoPage(prompt, 'replace');
   await chrome.storage.local.set({ lastInjectedPrompt: ok, lastInjectedAt: Date.now() });
 
   if (ok) {
@@ -136,8 +137,8 @@ async function handleExtraction(message) {
       console.log('[Class Extractor] /execute ok:', result);
     }
 
-    // 3. Write the API response back into the configured destination element.
-    await injectIntoPage(formatResponse(result));
+    // 3. Append the API response below the prompt so the prompt stays visible.
+    await injectIntoPage(formatResponse(result), 'append');
   } catch (error) {
     await chrome.storage.local.set({
       lastExecuteOk: false,
@@ -147,7 +148,8 @@ async function handleExtraction(message) {
 
     // Surface the failure into the destination element too, when possible.
     await injectIntoPage(
-      'ERROR: ' + (error instanceof Error ? error.message : String(error))
+      'ERROR: ' + (error instanceof Error ? error.message : String(error)),
+      'append'
     );
   }
 }
@@ -157,7 +159,7 @@ async function handleExtraction(message) {
  * configured destination element. Safe no-op if there is no active tab or
  * the destination is not present.
  */
-async function injectIntoPage(text) {
+async function injectIntoPage(text, mode) {
   if (typeof text !== 'string' || !text) return false;
 
   try {
@@ -166,7 +168,8 @@ async function injectIntoPage(text) {
 
     const response = await chrome.tabs.sendMessage(tab.id, {
       type: 'EXTRACTOR_INJECT',
-      text
+      text,
+      mode: mode === 'append' ? 'append' : 'replace'
     });
 
     return Boolean(response && response.ok);

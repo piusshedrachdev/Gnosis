@@ -317,6 +317,30 @@
   }
 
   /**
+   * Compose the final text to write given the injection mode.
+   *
+   *   'replace' -> the new content only (used for the initial prompt)
+   *   'append'  -> existing value + separator + new content (used for results)
+   *
+   * @param {string} existing
+   * @param {string} content
+   * @param {'replace'|'append'} mode
+   * @returns {string}
+   */
+  function composeContent(existing, content, mode) {
+    if (window.SelectorUtil && typeof window.SelectorUtil.composeContent === 'function') {
+      return window.SelectorUtil.composeContent(existing, content, mode);
+    }
+    // Fallback when selector.js has not loaded yet.
+    if (mode === 'append') {
+      if (!existing) return content;
+      if (!content) return existing;
+      return existing + '\n\n' + content;
+    }
+    return content;
+  }
+
+  /**
    * Write text into the textarea inside the configured destination container.
    *
    * Retries with backoff because the container (or its textarea) may render
@@ -324,9 +348,12 @@
    * true when an element was found and updated.
    *
    * @param {string} text
+   * @param {{mode?: 'replace'|'append'}} [options]
    * @returns {Promise<boolean>}
    */
-  window.__extractorInject = function (text) {
+  window.__extractorInject = function (text, options) {
+    const mode = options && options.mode === 'append' ? 'append' : 'replace';
+
     const { type, value } = currentInjectTarget();
     const containerSelector = buildSelector(type, value);
     if (!containerSelector) {
@@ -349,12 +376,15 @@
           try {
             if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
               el.focus();
-              setNativeValue(el, content);
+              const existing = typeof el.value === 'string' ? el.value : '';
+              const finalContent = composeContent(existing, content, mode);
+              setNativeValue(el, finalContent);
             } else {
-              el.textContent = content;
+              const existing = typeof el.textContent === 'string' ? el.textContent : '';
+              el.textContent = composeContent(existing, content, mode);
             }
             console.log(
-              `[Class Extractor] Injected ${content.length} chars into ${containerSelector} (${reason})`
+              `[Class Extractor] Injected ${content.length} chars (${mode}) into ${containerSelector} (${reason})`
             );
             resolve(true);
             return;
@@ -412,7 +442,7 @@
     } else if (message.type === 'EXTRACTOR_STOP') {
       window.__extractorStop();
     } else if (message.type === 'EXTRACTOR_INJECT') {
-      window.__extractorInject(message.text)
+      window.__extractorInject(message.text, { mode: message.mode })
         .then((ok) => sendResponse({ ok }))
         .catch((err) => sendResponse({ ok: false, error: String(err) }));
       return true; // keep the message channel open for the async reply

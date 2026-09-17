@@ -23,7 +23,11 @@ interface ParseResult {
 const Parser = require(parserPath) as {
   EXECUTE_CONTRACT: unknown;
   CAPABILITY_SCHEMAS: Record<string, unknown>;
-  buildPayload: (e: { className: string; value: string }) => {
+  DEFAULT_CAPABILITY: string;
+  buildPayload: (
+    e: { className?: string; value: string },
+    capability?: string
+  ) => {
     capability: string;
     arguments: Record<string, unknown>;
   };
@@ -136,5 +140,38 @@ describe("ExtractorParser.validatePayload", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.errors.join(" ")).toMatch(/text.*required/i);
+  });
+});
+
+describe("ExtractorParser capability selection (real runtime capabilities)", () => {
+  it("does not use the non-existent report_extracted_value capability", () => {
+    const result = Parser.parseExtraction({ className: "x", value: "hello" });
+    expect(result.ok).toBe(true);
+    expect(result.payload!.capability).not.toBe("computer.report_extracted_value");
+  });
+
+  it("defaults to computer.type_text (a real Munim capability)", () => {
+    expect(Parser.DEFAULT_CAPABILITY).toBe("computer.type_text");
+    const payload = Parser.buildPayload({ className: "x", value: "hi" });
+    expect(payload.capability).toBe("computer.type_text");
+    expect(payload.arguments).toEqual({ text: "hi" });
+  });
+
+  it("supports computer.browser_type with a tab_id", () => {
+    const payload = Parser.buildPayload(
+      { className: "x", value: "hi", tabId: 7 },
+      "computer.browser_type"
+    );
+    expect(payload.capability).toBe("computer.browser_type");
+    expect(payload.arguments).toEqual({ tab_id: 7, text: "hi" });
+  });
+
+  it("includes element_id for computer.type_text when provided", () => {
+    const payload = Parser.buildPayload({
+      className: "x",
+      value: "hi",
+      elementId: "e12",
+    });
+    expect(payload.arguments).toEqual({ text: "hi", element_id: "e12" });
   });
 });

@@ -122,12 +122,38 @@
     };
   }
 
+  /**
+   * Compose the final text to write into an injection target.
+   *
+   *   'replace' -> the new content only (initial prompt)
+   *   'append'  -> existing value + blank-line separator + new content (results)
+   *
+   * Kept pure so the append-vs-replace behavior is unit testable.
+   *
+   * @param {string} existing
+   * @param {string} content
+   * @param {'replace'|'append'} mode
+   * @returns {string}
+   */
+  function composeContent(existing, content, mode) {
+    const prev = typeof existing === 'string' ? existing : '';
+    const next = typeof content === 'string' ? content : '';
+
+    if (mode === 'append') {
+      if (!prev) return next;
+      if (!next) return prev;
+      return prev + '\n\n' + next;
+    }
+    return next;
+  }
+
   const SelectorUtil = {
     SELECTOR_TYPES: SELECTOR_TYPES,
     normalizeType: normalizeType,
     normalizeValue: normalizeValue,
     buildSelector: buildSelector,
     buildInjectTarget: buildInjectTarget,
+    composeContent: composeContent,
     buildTextareaTarget: buildTextareaTarget,
     shouldRun: shouldRun,
     canInject: canInject

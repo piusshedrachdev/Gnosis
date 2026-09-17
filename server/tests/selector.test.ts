@@ -31,6 +31,11 @@ const SelectorUtil = require(selectorPath) as {
     textareaSelector: string | null;
     valid: boolean;
   };
+  composeContent: (
+    existing: string,
+    content: string,
+    mode: "replace" | "append"
+  ) => string;
   shouldRun: (s: unknown) => boolean;
   canInject: (s: unknown) => boolean;
 };
@@ -229,5 +234,51 @@ describe("SelectorUtil.buildTextareaTarget (container -> textarea)", () => {
     expect(SelectorUtil.buildTextareaTarget(undefined).valid).toBe(false);
     expect(SelectorUtil.buildTextareaTarget(null).valid).toBe(false);
     expect(SelectorUtil.buildTextareaTarget("nope").valid).toBe(false);
+  });
+});
+
+describe("SelectorUtil.composeContent (replace vs append)", () => {
+  it("replace mode returns only the new content", () => {
+    expect(SelectorUtil.composeContent("OLD PROMPT", "NEW", "replace")).toBe("NEW");
+  });
+
+  it("append mode keeps the prompt and adds the result below it", () => {
+    const out = SelectorUtil.composeContent(
+      "PROMPT TEXT",
+      '{ "ok": true }',
+      "append"
+    );
+    expect(out).toBe('PROMPT TEXT\n\n{ "ok": true }');
+    expect(out.startsWith("PROMPT TEXT")).toBe(true);
+    expect(out).toContain('{ "ok": true }');
+  });
+
+  it("append mode with empty existing returns the new content", () => {
+    expect(SelectorUtil.composeContent("", "RESULT", "append")).toBe("RESULT");
+  });
+
+  it("append mode with empty content returns the existing content", () => {
+    expect(SelectorUtil.composeContent("PROMPT", "", "append")).toBe("PROMPT");
+  });
+
+  it("handles non-string inputs safely", () => {
+    // @ts-expect-error deliberate bad input
+    expect(SelectorUtil.composeContent(undefined, "X", "replace")).toBe("X");
+    // @ts-expect-error deliberate bad input
+    expect(SelectorUtil.composeContent("X", undefined, "append")).toBe("X");
+  });
+
+  it("demonstrates the bug fix: prompt survives the response", () => {
+    const prompt = "CAPABILITY PROMPT";
+    const response = '{ "ok": true, "result": "typed 32 characters" }';
+
+    // Old behavior: the response replaced the prompt entirely.
+    const oldBehavior = SelectorUtil.composeContent(prompt, response, "replace");
+    expect(oldBehavior).not.toContain("CAPABILITY PROMPT");
+
+    // New behavior: the response is appended, prompt remains.
+    const newBehavior = SelectorUtil.composeContent(prompt, response, "append");
+    expect(newBehavior).toContain("CAPABILITY PROMPT");
+    expect(newBehavior).toContain('"ok": true');
   });
 });

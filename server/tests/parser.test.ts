@@ -63,13 +63,16 @@ describe("ExtractorParser.parseExtraction", () => {
     expect(result.report).toMatch(/NOT_A_TOOL_CALL/);
   });
 
-  it("REJECTS an unknown/invented capability name", () => {
+  it("ACCEPTS any well-formed computer.* capability (server validates names)", () => {
+    // Regression: the extension only holds schemas for a subset of tools. It
+    // must NOT drop valid tool calls for the others (list_apps, screenshot,
+    // browser_open_tab, ...). The server owns strict name validation.
     const result = Parser.parseExtraction({
       className: "message",
-      value: '{ "capability": "computer.do_magic", "arguments": {} }',
+      value: '{ "capability": "computer.list_apps", "arguments": {} }',
     });
-    expect(result.ok).toBe(false);
-    expect(result.errors.join(" ")).toMatch(/Unknown capability/i);
+    expect(result.ok).toBe(true);
+    expect(result.payload!.capability).toBe("computer.list_apps");
   });
 
   it("tolerates surrounding prose around a valid capability call", () => {
@@ -198,10 +201,19 @@ describe("ExtractorParser.buildPayload gating (tool-call only)", () => {
     expect(built.call).toBeNull();
   });
 
-  it("rejects an unknown capability name", () => {
+  it("accepts a well-formed capability name we lack a local schema for", () => {
     const built = Parser.buildPayload({
       className: "x",
-      value: '{ "capability": "computer.nope", "arguments": {} }',
+      value: '{ "capability": "computer.get_app_state", "arguments": { "app": "Finder" } }',
+    });
+    expect(built.ok).toBe(true);
+    expect(built.call.capability).toBe("computer.get_app_state");
+  });
+
+  it("rejects a name with no capability prefix at all", () => {
+    const built = Parser.buildPayload({
+      className: "x",
+      value: '{ "capability": "do_thing", "arguments": {} }',
     });
     expect(built.ok).toBe(false);
     expect(built.reason).toMatch(/Unknown capability/i);
@@ -235,8 +247,9 @@ describe("ExtractorParser.isKnownCapabilityName", () => {
     expect(Parser.isKnownCapabilityName("capabilities.describe")).toBe(true);
   });
 
-  it("rejects invented computer.* names", () => {
-    expect(Parser.isKnownCapabilityName("computer.do_magic")).toBe(false);
+  it("accepts well-formed computer.* names even without a local schema", () => {
+    expect(Parser.isKnownCapabilityName("computer.list_apps")).toBe(true);
+    expect(Parser.isKnownCapabilityName("computer.screenshot")).toBe(true);
   });
 
   it("rejects empty or unrelated names", () => {

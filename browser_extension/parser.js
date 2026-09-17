@@ -291,11 +291,18 @@
   }
 
   /**
-   * True when a capability name is one this extension can vouch for: it must
-   * be a runtime meta-capability or a capability we hold a schema for. We do
-   * NOT accept arbitrary `computer.*` names, because an invented name would be
-   * rejected by the runtime with CAPABILITY_NOT_FOUND — the gate must catch it
-   * here so nothing invalid is executed or injected.
+   * True when a capability name is structurally valid: a runtime
+   * meta-capability, or a provider capability under the known prefix, or a
+   * name we hold a local schema for.
+   *
+   * We deliberately ACCEPT any well-formed `computer.*` name rather than only
+   * the handful we hold schemas for. The server registers the full set of
+   * Munim tools (dozens of them: list_apps, get_app_state, click, type_text,
+   * press_key, scroll, screenshot, browser_*, ...), and the extension only
+   * keeps schemas for a subset. Rejecting the rest here silently dropped valid
+   * tool calls before they ever reached the server. Strict validation of the
+   * name and arguments is the server's job; the extension's job is to reject
+   * non-tool-call text, not to gatekeep real capabilities.
    *
    * @param {string} name
    * @returns {boolean}
@@ -303,7 +310,11 @@
   function isKnownCapabilityName(name) {
     if (!isNonEmptyString(name)) return false;
     if (META_CAPABILITIES.indexOf(name) !== -1) return true;
-    return Object.prototype.hasOwnProperty.call(CAPABILITY_SCHEMAS, name);
+    if (Object.prototype.hasOwnProperty.call(CAPABILITY_SCHEMAS, name)) return true;
+    if (name.indexOf(CAPABILITY_PREFIX) === 0 && name.length > CAPABILITY_PREFIX.length) {
+      return true;
+    }
+    return false;
   }
 
   /**

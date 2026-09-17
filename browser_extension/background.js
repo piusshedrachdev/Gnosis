@@ -115,8 +115,14 @@ async function handleExtraction(message) {
         parsed.errors
       );
     } else {
-      console.log(
-        '[Class Extractor] Extracted text is not a tool call; nothing sent or injected.'
+      // Show enough of the text to diagnose why it was rejected. If this looks
+      // like a real tool call, the gate is too strict or the JSON was partial.
+      const preview = (extraction.value || '').slice(0, 300);
+      console.warn(
+        '[Class Extractor] Extracted text is not a tool call; nothing sent or injected. Reason:',
+        parsed.errors && parsed.errors[0],
+        '\nPreview:',
+        preview
       );
     }
     return;
@@ -149,6 +155,10 @@ async function handleExtraction(message) {
 
     // 3. Append the API response below the prompt so the prompt stays visible.
     await injectIntoPage(formatResponse(result), 'append');
+
+    // 4. If auto-send is on, click the configured button (only reached on a
+    //    matched, executed tool call — never for free-form text).
+    await maybeAutoClick();
   } catch (error) {
     await chrome.storage.local.set({
       lastExecuteOk: false,
@@ -186,6 +196,59 @@ async function injectIntoPage(text, mode) {
   } catch (error) {
     // Content script may be absent on restricted pages; not fatal.
     console.warn('[Class Extractor] Injection skipped:', error);
+    return false;
+  }
+}
+
+/**
+ * If auto-send is enabled, ask the content script to click the configured
+ * button. Only called after a matched tool call is executed and injected, so
+ * free-form text never triggers a click.
+ */
+async function maybeAutoClick() {
+  const state = await chrome.storage.local.get({
+    autoSend: false,
+    buttonType: 'class',
+    buttonValue: ''
+  });
+
+  if (!SelectorUtil.shouldAutoClick(state)) {
+    if (state.autoSend) {
+      console.warn('[Class Extractor] Auto-send on but no button selector configured.');
+    } else {
+      console.log('[Class Extractor] Auto-send off; waiting for manual send.');
+    }
+    await chrome.storage.local.set({ lastAutoClicked: false });
+    return false;
+  }
+
+  const ok = await clickButtonInPage();
+  await chrome.storage.local.set({ lastAutoClicked: ok, lastAutoClickedAt: Date.now() });
+
+  if (ok) {
+    console.log('[Class Extractor] Auto-send: button clicked.');
+  } else {
+    console.warn('[Class Extractor] Auto-send: could not click the button.');
+  }
+
+  return ok;
+}
+
+/**
+ * Send the auto-click request to the active tab's content script.
+ */
+async function clickButtonInPage() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.id) return false;
+
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: 'EXTRACTOR_CLICK_BUTTON'
+    });
+
+    return Boolean(response && response.ok);
+  } catch (error) {
+    console.warn('[Class Extractor] Auto-click skipped:', error);
     return false;
   }
 }

@@ -36,6 +36,13 @@ const SelectorUtil = require(selectorPath) as {
     content: string,
     mode: "replace" | "append"
   ) => string;
+  buildButtonTarget: (s: unknown) => {
+    type: string;
+    value: string;
+    selector: string | null;
+    valid: boolean;
+  };
+  shouldAutoClick: (s: unknown) => boolean;
   shouldRun: (s: unknown) => boolean;
   canInject: (s: unknown) => boolean;
 };
@@ -280,5 +287,77 @@ describe("SelectorUtil.composeContent (replace vs append)", () => {
     const newBehavior = SelectorUtil.composeContent(prompt, response, "append");
     expect(newBehavior).toContain("CAPABILITY PROMPT");
     expect(newBehavior).toContain('"ok": true');
+  });
+});
+
+describe("SelectorUtil.buildButtonTarget (auto-click)", () => {
+  it("builds a class button selector", () => {
+    const target = SelectorUtil.buildButtonTarget({
+      buttonType: "class",
+      buttonValue: "send-button",
+    });
+    expect(target.valid).toBe(true);
+    expect(target.selector).toBe(".send-button");
+  });
+
+  it("builds an id button selector", () => {
+    const target = SelectorUtil.buildButtonTarget({
+      buttonType: "id",
+      buttonValue: "submit",
+    });
+    expect(target.selector).toBe("#submit");
+    expect(target.valid).toBe(true);
+  });
+
+  it("is invalid when no button value is provided", () => {
+    const target = SelectorUtil.buildButtonTarget({
+      buttonType: "class",
+      buttonValue: "",
+    });
+    expect(target.valid).toBe(false);
+    expect(target.selector).toBeNull();
+  });
+
+  it("handles missing/invalid state safely", () => {
+    expect(SelectorUtil.buildButtonTarget(undefined).valid).toBe(false);
+    expect(SelectorUtil.buildButtonTarget(null).valid).toBe(false);
+  });
+});
+
+describe("SelectorUtil.shouldAutoClick (auto-send gating)", () => {
+  it("is true only when auto-send is on AND a button is set", () => {
+    expect(
+      SelectorUtil.shouldAutoClick({
+        autoSend: true,
+        buttonType: "class",
+        buttonValue: "send",
+      })
+    ).toBe(true);
+  });
+
+  it("is false when auto-send is off", () => {
+    expect(
+      SelectorUtil.shouldAutoClick({
+        autoSend: false,
+        buttonType: "class",
+        buttonValue: "send",
+      })
+    ).toBe(false);
+  });
+
+  it("is false when auto-send is on but no button value is set", () => {
+    expect(
+      SelectorUtil.shouldAutoClick({
+        autoSend: true,
+        buttonType: "class",
+        buttonValue: "",
+      })
+    ).toBe(false);
+  });
+
+  it("handles missing/invalid state safely", () => {
+    expect(SelectorUtil.shouldAutoClick(undefined)).toBe(false);
+    expect(SelectorUtil.shouldAutoClick(null)).toBe(false);
+    expect(SelectorUtil.shouldAutoClick("nope")).toBe(false);
   });
 });

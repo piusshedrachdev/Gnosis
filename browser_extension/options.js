@@ -3,6 +3,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const selectorValueInput = document.getElementById('selectorValue');
   // Injection (destination) controls
   const injectValueInput = document.getElementById('injectValue');
+  // Auto-send controls
+  const autoSendInput = document.getElementById('autoSend');
+  const buttonValueInput = document.getElementById('buttonValue');
 
   const startBtn = document.getElementById('start');
   const stopBtn = document.getElementById('stop');
@@ -52,11 +55,23 @@ document.addEventListener('DOMContentLoaded', () => {
     startBtn.disabled = running;
     stopBtn.disabled = !running;
 
-    // Lock both selector inputs (source + destination) while running.
+    // Lock all inputs (source, destination, auto-send) while running.
     selectorValueInput.disabled = running;
     injectValueInput.disabled = running;
+    autoSendInput.disabled = running;
+    buttonValueInput.disabled = running;
     disableGroup('selectorType', running);
     disableGroup('injectType', running);
+    disableGroup('buttonType', running);
+  }
+
+  /** Enable/disable the button selector fields based on the Auto toggle. */
+  function syncAutoControls() {
+    const on = autoSendInput.checked;
+    buttonValueInput.disabled = !on;
+    document.querySelectorAll('input[name="buttonType"]').forEach((el) => {
+      el.disabled = !on;
+    });
   }
 
   // ---- Load persisted session state ----
@@ -73,6 +88,11 @@ document.addEventListener('DOMContentLoaded', () => {
         injectType: 'class',
         injectValue: '',
 
+        // Auto-send config
+        autoSend: false,
+        buttonType: 'class',
+        buttonValue: '',
+
         lastValue: '',
         lastUpdated: 0,
         lastClassName: '',
@@ -88,6 +108,12 @@ document.addEventListener('DOMContentLoaded', () => {
         injectValueInput.value = items.injectValue || '';
         setRadioValue('injectType', items.injectType || 'class');
 
+        // Auto-send
+        autoSendInput.checked = Boolean(items.autoSend);
+        buttonValueInput.value = items.buttonValue || '';
+        setRadioValue('buttonType', items.buttonType || 'class');
+        syncAutoControls();
+
         setState(Boolean(items.extractorRunning));
         renderLastValue(items);
       }
@@ -99,8 +125,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const srcType = items.selectorType === 'id' ? '#' : '.';
     const dstType = items.injectType === 'id' ? '#' : '.';
+    const btnType = items.buttonType === 'id' ? '#' : '.';
+    const autoText = items.autoSend
+      ? ` \u2022 Auto-click: ${btnType}${items.buttonValue || '(none)'}`
+      : ' \u2022 Auto-click: off';
     lastMetaEl.textContent = items.lastUpdated
-      ? `Extract: ${srcType}${items.selectorValue || items.lastClassName || ''} \u2022 Inject: ${dstType}${items.injectValue || '(none)'} \u2022 Updated: ${new Date(items.lastUpdated).toLocaleTimeString()}`
+      ? `Extract: ${srcType}${items.selectorValue || items.lastClassName || ''} \u2022 Inject: ${dstType}${items.injectValue || '(none)'}${autoText} \u2022 Updated: ${new Date(items.lastUpdated).toLocaleTimeString()}`
       : '';
 
     if (items.lastParseOk === true) {
@@ -123,6 +153,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const injectType = selectedRadioValue('injectType', 'class');
     const injectValue = injectValueInput.value.trim();
 
+    const autoSend = autoSendInput.checked;
+    const buttonType = selectedRadioValue('buttonType', 'class');
+    const buttonValue = buttonValueInput.value.trim();
+
     if (!selectorValue) {
       showStatus('Please enter a class or id to extract from.', true);
       return;
@@ -133,7 +167,12 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Persist the full session config (source + destination) and flip running.
+    if (autoSend && !buttonValue) {
+      showStatus('Auto is on — please enter the class or id of the button to click.', true);
+      return;
+    }
+
+    // Persist the full session config (source + destination + auto-send).
     await chrome.storage.local.set({
       extractorRunning: true,
 
@@ -142,6 +181,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       injectType,
       injectValue,
+
+      autoSend,
+      buttonType,
+      buttonValue,
 
       lastValue: '',
       lastUpdated: 0,
@@ -170,7 +213,10 @@ document.addEventListener('DOMContentLoaded', () => {
           selectorType,
           selectorValue,
           injectType,
-          injectValue
+          injectValue,
+          autoSend,
+          buttonType,
+          buttonValue
         });
 
         // Ask the background worker to build the capability prompt and write
@@ -219,6 +265,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   injectValueInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !startBtn.disabled) startBtn.click();
+  });
+  buttonValueInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !startBtn.disabled) startBtn.click();
+  });
+
+  // Toggle the button-selector fields when Auto is switched on/off.
+  autoSendInput.addEventListener('change', () => {
+    if (!stateEl.classList.contains('running')) syncAutoControls();
   });
 
   // ---- Keep the UI in sync with storage ----

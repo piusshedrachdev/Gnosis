@@ -411,12 +411,89 @@
     });
   };
 
+  // ---- Auto-click (send) ----
+  /**
+   * Click the configured button (id or class) after a successful matched
+   * extract + inject. Retries with backoff because the button may appear
+   * slightly later. Resolves true when the button was found and clicked.
+   *
+   * @returns {Promise<boolean>}
+   */
+  window.__extractorClickButton = function () {
+    const type = window.__extractorButtonType || 'class';
+    const value = window.__extractorButtonValue || '';
+    const selector = buildSelector(type, value);
+
+    if (!selector) {
+      console.warn('[Class Extractor] Auto-click is on but no button selector is set.');
+      return Promise.resolve(false);
+    }
+
+    const delays = [0, 150, 400, 900, 1800];
+
+    return new Promise((resolve) => {
+      let attempt = 0;
+
+      function tryClick() {
+        let el = null;
+        try {
+          el = document.querySelector(selector);
+        } catch (e) {
+          console.warn('[Class Extractor] Invalid button selector:', selector);
+          resolve(false);
+          return;
+        }
+
+        if (el) {
+          try {
+            el.focus && el.focus();
+            // Prefer a real click(); fall back to dispatching a MouseEvent.
+            if (typeof el.click === 'function') {
+              el.click();
+            } else {
+              el.dispatchEvent(
+                new MouseEvent('click', { bubbles: true, cancelable: true, view: window })
+              );
+            }
+            console.log(`[Class Extractor] Auto-clicked ${selector}`);
+            resolve(true);
+            return;
+          } catch (e) {
+            console.warn('[Class Extractor] Auto-click failed:', e);
+            resolve(false);
+            return;
+          }
+        }
+
+        attempt += 1;
+        if (attempt >= delays.length) {
+          console.warn(`[Class Extractor] Button not found for auto-click: ${selector}`);
+          resolve(false);
+          return;
+        }
+
+        setTimeout(tryClick, delays[attempt]);
+      }
+
+      tryClick();
+    });
+  };
+
   // ---- Public control surface (driven by options page / background) ----
-  window.__extractorStart = function (selectorType, selectorValue, injectType, injectValue) {
+  window.__extractorStart = function (
+    selectorType,
+    selectorValue,
+    injectType,
+    injectValue,
+    buttonType,
+    buttonValue
+  ) {
     window.__extractorSelectorType = selectorType === 'id' ? 'id' : 'class';
     window.__extractorSelectorValue = selectorValue || '';
     window.__extractorInjectType = injectType === 'id' ? 'id' : 'class';
     window.__extractorInjectValue = injectValue || '';
+    window.__extractorButtonType = buttonType === 'id' ? 'id' : 'class';
+    window.__extractorButtonValue = buttonValue || '';
     running = true;
     armed = false;
     startObserver();
@@ -437,7 +514,9 @@
         message.selectorType,
         message.selectorValue,
         message.injectType,
-        message.injectValue
+        message.injectValue,
+        message.buttonType,
+        message.buttonValue
       );
     } else if (message.type === 'EXTRACTOR_STOP') {
       window.__extractorStop();
@@ -446,6 +525,11 @@
         .then((ok) => sendResponse({ ok }))
         .catch((err) => sendResponse({ ok: false, error: String(err) }));
       return true; // keep the message channel open for the async reply
+    } else if (message.type === 'EXTRACTOR_CLICK_BUTTON') {
+      window.__extractorClickButton()
+        .then((ok) => sendResponse({ ok }))
+        .catch((err) => sendResponse({ ok: false, error: String(err) }));
+      return true;
     }
 
     return false;
@@ -458,7 +542,9 @@
       selectorType: 'class',
       selectorValue: '',
       injectType: 'class',
-      injectValue: ''
+      injectValue: '',
+      buttonType: 'class',
+      buttonValue: ''
     },
     (items) => {
       if (items.extractorRunning && items.selectorValue) {
@@ -466,7 +552,9 @@
           items.selectorType,
           items.selectorValue,
           items.injectType,
-          items.injectValue
+          items.injectValue,
+          items.buttonType,
+          items.buttonValue
         );
       }
       // Otherwise: do nothing. The extension waits for the user to click Start.

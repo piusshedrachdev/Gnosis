@@ -147,12 +147,43 @@
     return next;
   }
 
+  /**
+   * Build the auto-click button target from persisted state.
+   *
+   * @param {{buttonType?:string, buttonValue?:string}} state
+   * @returns {{type:'class'|'id', value:string, selector:string|null, valid:boolean}}
+   */
+  function buildButtonTarget(state) {
+    const type = normalizeType(state && state.buttonType);
+    const value = normalizeValue(state && state.buttonValue);
+    const selector = buildSelector(type, value);
+    return {
+      type: type,
+      value: value,
+      selector: selector,
+      valid: selector !== null
+    };
+  }
+
+  /**
+   * Whether an auto-click should happen: auto-send on AND a valid button.
+   *
+   * @param {{autoSend?:boolean, buttonType?:string, buttonValue?:string}} state
+   * @returns {boolean}
+   */
+  function shouldAutoClick(state) {
+    if (!state || typeof state !== 'object') return false;
+    return Boolean(state.autoSend) && buildButtonTarget(state).valid;
+  }
+
   const SelectorUtil = {
     SELECTOR_TYPES: SELECTOR_TYPES,
     normalizeType: normalizeType,
     normalizeValue: normalizeValue,
     buildSelector: buildSelector,
     buildInjectTarget: buildInjectTarget,
+    buildButtonTarget: buildButtonTarget,
+    shouldAutoClick: shouldAutoClick,
     composeContent: composeContent,
     buildTextareaTarget: buildTextareaTarget,
     shouldRun: shouldRun,

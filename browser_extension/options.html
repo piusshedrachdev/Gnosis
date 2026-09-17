@@ -120,6 +120,20 @@
   <input type="text" id="injectValue" placeholder="e.g., chat-input or my-composer-id">
   <p class="hint">The extension finds this container and writes into the &lt;textarea&gt; inside it.</p>
 
+  <h4>3. Auto-send (optional)</h4>
+  <div class="row">
+    <label><input type="checkbox" id="autoSend"> Auto — click a button after a matched extract &amp; inject</label>
+  </div>
+  <p class="hint">When ON, the extension clicks the button below automatically after a valid tool-call is executed and injected. When OFF, you send manually.</p>
+
+  <div class="row">
+    <label><input type="radio" name="buttonType" value="class" checked> Class</label>
+    <label><input type="radio" name="buttonType" value="id"> ID</label>
+  </div>
+
+  <label for="buttonValue">Class or id of the button to click:</label>
+  <input type="text" id="buttonValue" placeholder="e.g., send-button or my-submit-id">
+
   <div class="row">
     <button id="start">Start</button>
     <button id="stop" disabled>Stop</button>

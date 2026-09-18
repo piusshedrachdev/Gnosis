@@ -535,29 +535,31 @@
     return false;
   });
 
-  // ---- Resume a running session across page loads (no-op when idle) ----
-  chrome.storage.local.get(
-    {
-      extractorRunning: false,
-      selectorType: 'class',
-      selectorValue: '',
-      injectType: 'class',
-      injectValue: '',
-      buttonType: 'class',
-      buttonValue: ''
-    },
-    (items) => {
-      if (items.extractorRunning && items.selectorValue) {
+  // ---- Resume a running session for THIS page (no-op when idle) ----
+  chrome.storage.local.get({ extractorRunning: false }, (globalItems) => {
+    if (!globalItems.extractorRunning) return;
+
+    // Resolve the current page's origin and load its per-page settings.
+    const pageKey = window.SelectorUtil
+      ? window.SelectorUtil.pageKeyFromUrl(window.location.href)
+      : null;
+    if (!pageKey) return;
+
+    const settingsKey = window.SelectorUtil.pageSettingsKey(pageKey);
+    chrome.storage.local.get(
+      { [settingsKey]: window.SelectorUtil.emptyPageSettings() },
+      (items) => {
+        const s = window.SelectorUtil.pickPageSettings(items[settingsKey]);
+        if (!s.selectorValue) return; // no saved settings for this page
         window.__extractorStart(
-          items.selectorType,
-          items.selectorValue,
-          items.injectType,
-          items.injectValue,
-          items.buttonType,
-          items.buttonValue
+          s.selectorType,
+          s.selectorValue,
+          s.injectType,
+          s.injectValue,
+          s.buttonType,
+          s.buttonValue
         );
       }
-      // Otherwise: do nothing. The extension waits for the user to click Start.
-    }
-  );
+    );
+  });
 })();

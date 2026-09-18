@@ -179,11 +179,26 @@ async function handleExtraction(message) {
  * configured destination element. Safe no-op if there is no active tab or
  * the destination is not present.
  */
+/**
+ * Resolve the real web page tab (never the options/extension tab). Prefers the
+ * active tab of the last focused normal window, then falls back to scanning
+ * for any usable http(s) tab.
+ */
+async function resolvePageTab() {
+  try {
+    const all = await chrome.tabs.query({ windowType: 'normal' });
+    return SelectorUtil.pickPageTab(all);
+  } catch (error) {
+    console.warn('[Class Extractor] Could not resolve page tab:', error);
+    return null;
+  }
+}
+
 async function injectIntoPage(text, mode) {
   if (typeof text !== 'string' || !text) return false;
 
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = await resolvePageTab();
     if (!tab || !tab.id) return false;
 
     const response = await chrome.tabs.sendMessage(tab.id, {
@@ -206,11 +221,23 @@ async function injectIntoPage(text, mode) {
  * free-form text never triggers a click.
  */
 async function maybeAutoClick() {
-  const state = await chrome.storage.local.get({
-    autoSend: false,
-    buttonType: 'class',
-    buttonValue: ''
-  });
+  // Resolve the active tab's page and read ITS saved auto-send settings.
+  let state = { autoSend: false, buttonType: 'class', buttonValue: '' };
+
+  try {
+    const tab = await resolvePageTab();
+    const pageUrl = tab && (tab.url || tab.pendingUrl);
+    const pageKey = pageUrl ? SelectorUtil.pageKeyFromUrl(pageUrl) : null;
+    if (pageKey) {
+      const settingsKey = SelectorUtil.pageSettingsKey(pageKey);
+      const stored = await chrome.storage.local.get({
+        [settingsKey]: SelectorUtil.emptyPageSettings()
+      });
+      state = SelectorUtil.pickPageSettings(stored[settingsKey]);
+    }
+  } catch (err) {
+    console.warn('[Class Extractor] Could not resolve page settings for auto-click:', err);
+  }
 
   if (!SelectorUtil.shouldAutoClick(state)) {
     if (state.autoSend) {
@@ -239,7 +266,7 @@ async function maybeAutoClick() {
  */
 async function clickButtonInPage() {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = await resolvePageTab();
     if (!tab || !tab.id) return false;
 
     const response = await chrome.tabs.sendMessage(tab.id, {

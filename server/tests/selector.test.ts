@@ -43,6 +43,12 @@ const SelectorUtil = require(selectorPath) as {
     valid: boolean;
   };
   shouldAutoClick: (s: unknown) => boolean;
+  pageKeyFromUrl: (u: string) => string | null;
+  pageSettingsKey: (k: string) => string;
+  emptyPageSettings: () => Record<string, unknown>;
+  pickPageSettings: (s: unknown) => Record<string, unknown>;
+  pageLabel: (k: string) => string;
+  pickPageTab: (tabs: unknown) => { id?: number; url?: string } | null;
   shouldRun: (s: unknown) => boolean;
   canInject: (s: unknown) => boolean;
 };
@@ -359,5 +365,151 @@ describe("SelectorUtil.shouldAutoClick (auto-send gating)", () => {
     expect(SelectorUtil.shouldAutoClick(undefined)).toBe(false);
     expect(SelectorUtil.shouldAutoClick(null)).toBe(false);
     expect(SelectorUtil.shouldAutoClick("nope")).toBe(false);
+  });
+});
+
+describe("SelectorUtil.pageKeyFromUrl (per-page keying)", () => {
+  it("reduces an https URL to its origin", () => {
+    expect(SelectorUtil.pageKeyFromUrl("https://www.whatsapp.com/send?x=1")).toBe(
+      "https://www.whatsapp.com"
+    );
+  });
+
+  it("keeps http vs https distinct", () => {
+    expect(SelectorUtil.pageKeyFromUrl("http://example.com")).toBe("http://example.com");
+    expect(SelectorUtil.pageKeyFromUrl("https://example.com")).toBe("https://example.com");
+  });
+
+  it("keeps port in the origin", () => {
+    expect(SelectorUtil.pageKeyFromUrl("http://localhost:3000/app")).toBe(
+      "http://localhost:3000"
+    );
+  });
+
+  it("rejects non-http(s) and invalid URLs", () => {
+    expect(SelectorUtil.pageKeyFromUrl("chrome://extensions")).toBeNull();
+    expect(SelectorUtil.pageKeyFromUrl("file:///C:/x.html")).toBeNull();
+    expect(SelectorUtil.pageKeyFromUrl("about:blank")).toBeNull();
+    expect(SelectorUtil.pageKeyFromUrl("not a url")).toBeNull();
+    expect(SelectorUtil.pageKeyFromUrl("")).toBeNull();
+  });
+});
+
+describe("SelectorUtil.pageSettingsKey + emptyPageSettings", () => {
+  it("namespaces the storage key by page", () => {
+    expect(SelectorUtil.pageSettingsKey("https://example.com")).toBe(
+      "pageSettings:https://example.com"
+    );
+  });
+
+  it("returns a full default settings record", () => {
+    const s = SelectorUtil.emptyPageSettings();
+    expect(s).toEqual({
+      selectorType: "class",
+      selectorValue: "",
+      injectType: "class",
+      injectValue: "",
+      autoSend: false,
+      buttonType: "class",
+      buttonValue: "",
+    });
+  });
+});
+
+describe("SelectorUtil.pickPageSettings", () => {
+  it("keeps only known fields and applies defaults", () => {
+    const picked = SelectorUtil.pickPageSettings({
+      selectorType: "id",
+      selectorValue: "out",
+      injectType: "class",
+      injectValue: "composer",
+      autoSend: true,
+      buttonType: "id",
+      buttonValue: "send",
+      extra: "ignored",
+    });
+    expect(picked).toEqual({
+      selectorType: "id",
+      selectorValue: "out",
+      injectType: "class",
+      injectValue: "composer",
+      autoSend: true,
+      buttonType: "id",
+      buttonValue: "send",
+    });
+  });
+
+  it("fills defaults for a missing/invalid record", () => {
+    expect(SelectorUtil.pickPageSettings(undefined)).toEqual(
+      SelectorUtil.emptyPageSettings()
+    );
+    expect(SelectorUtil.pickPageSettings(null)).toEqual(
+      SelectorUtil.emptyPageSettings()
+    );
+  });
+});
+
+describe("SelectorUtil.pageLabel", () => {
+  it("strips the scheme for display", () => {
+    expect(SelectorUtil.pageLabel("https://www.whatsapp.com")).toBe("www.whatsapp.com");
+    expect(SelectorUtil.pageLabel("http://localhost:3000")).toBe("localhost:3000");
+  });
+});
+
+describe("SelectorUtil.pickPageTab (skip extension/options tabs)", () => {
+  it("picks the active web tab, skipping a chrome-extension tab", () => {
+    const tab = SelectorUtil.pickPageTab([
+      { id: 1, url: "chrome-extension://abc/options.html", active: true },
+      { id: 2, url: "https://www.whatsapp.com/", active: false },
+    ]);
+    expect(tab).not.toBeNull();
+    expect(tab!.id).toBe(2);
+  });
+
+  it("prefers an active usable tab over inactive ones", () => {
+    const tab = SelectorUtil.pickPageTab([
+      { id: 1, url: "https://a.com/", active: false, lastAccessed: 999 },
+      { id: 2, url: "https://b.com/", active: true, lastAccessed: 1 },
+    ]);
+    expect(tab!.id).toBe(2);
+  });
+
+  it("falls back to the most recently accessed usable tab", () => {
+    const tab = SelectorUtil.pickPageTab([
+      { id: 1, url: "https://old.com/", active: false, lastAccessed: 10 },
+      { id: 2, url: "https://new.com/", active: false, lastAccessed: 50 },
+    ]);
+    expect(tab!.id).toBe(2);
+  });
+
+  it("returns null when no usable tab exists", () => {
+    expect(
+      SelectorUtil.pickPageTab([
+        { id: 1, url: "chrome-extension://abc/options.html", active: true },
+        { id: 2, url: "chrome://extensions", active: false },
+      ])
+    ).toBeNull();
+    expect(SelectorUtil.pickPageTab([])).toBeNull();
+    expect(SelectorUtil.pickPageTab(undefined)).toBeNull();
+  });
+
+  it("finds a chat.deepseek.com page tab when the options tab is active", () => {
+    const tab = SelectorUtil.pickPageTab([
+      { id: 1, url: "chrome-extension://abc/options.html", active: true },
+      { id: 2, url: "https://chat.deepseek.com/", active: false },
+    ]);
+    expect(tab).not.toBeNull();
+    expect(SelectorUtil.pageKeyFromUrl((tab as any).url)).toBe(
+      "https://chat.deepseek.com"
+    );
+  });
+
+  it("accepts a tab that only exposes pendingUrl (still loading)", () => {
+    const tab = SelectorUtil.pickPageTab([
+      { id: 1, url: "chrome-extension://abc/options.html", active: true },
+      { id: 2, pendingUrl: "https://chat.deepseek.com/", active: false },
+    ]);
+    expect(tab).not.toBeNull();
+    expect((tab as any).id).toBe(2);
   });
 });

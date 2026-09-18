@@ -24,6 +24,16 @@
       border-radius: 6px;
       font-size: 14px;
     }
+    select {
+      width: 100%;
+      padding: 8px;
+      box-sizing: border-box;
+      margin-bottom: 12px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 14px;
+      background: #fff;
+    }
     .row {
       display: flex;
       gap: 8px;
@@ -101,6 +111,16 @@
     <span id="state" class="waiting">waiting</span>
   </div>
 
+  <div class="row">
+    <span>Page:</span>
+    <span id="pageLabel">(unknown)</span>
+  </div>
+
+  <label for="savedPages">Saved pages:</label>
+  <select id="savedPages">
+    <option value="">— select a page with saved settings —</option>
+  </select>
+
   <h4>1. Extract from (source)</h4>
   <div class="row">
     <label><input type="radio" name="selectorType" value="class" checked> Class</label>
@@ -148,6 +168,7 @@
   <p id="lastMeta"></p>
   <p id="parseReport"></p>
 
+  <script src="selector.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

@@ -176,8 +176,111 @@
     return Boolean(state.autoSend) && buildButtonTarget(state).valid;
   }
 
+  // ---- Per-page settings keys -------------------------------------------
+
+  // Namespace for per-page settings stored in chrome.storage.local.
+  const PAGE_KEY_PREFIX = 'pageSettings:';
+  // Index of every origin that has saved settings.
+  const PAGE_INDEX_KEY = 'savedPages';
+
+  /**
+   * Normalize a URL to a page key (its origin), e.g.
+   *   https://www.whatsapp.com/send?x=1  ->  https://www.whatsapp.com
+   * Returns null for URLs with no usable http(s) origin (chrome://, file://,
+   * about:, etc.), so we never key settings on unusable pages.
+   *
+   * @param {string} url
+   * @returns {string|null}
+   */
+  function pageKeyFromUrl(url) {
+    if (typeof url !== 'string' || !url) return null;
+    try {
+      const u = new URL(url);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+      if (!u.hostname) return null;
+      return u.protocol + '//' + u.host;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** Storage key for a page's settings record. */
+  function pageSettingsKey(pageKey) {
+    return PAGE_KEY_PREFIX + pageKey;
+  }
+
+  /** The stored settings fields, with defaults. */
+  function emptyPageSettings() {
+    return {
+      selectorType: 'class',
+      selectorValue: '',
+      injectType: 'class',
+      injectValue: '',
+      autoSend: false,
+      buttonType: 'class',
+      buttonValue: ''
+    };
+  }
+
+  /**
+   * Pick only the per-page settings fields out of a larger object.
+   *
+   * @param {object} source
+   * @returns {object}
+   */
+  function pickPageSettings(source) {
+    const out = emptyPageSettings();
+    if (!source || typeof source !== 'object') return out;
+    if (source.selectorType === 'id' || source.selectorType === 'class') out.selectorType = source.selectorType;
+    if (typeof source.selectorValue === 'string') out.selectorValue = source.selectorValue;
+    if (source.injectType === 'id' || source.injectType === 'class') out.injectType = source.injectType;
+    if (typeof source.injectValue === 'string') out.injectValue = source.injectValue;
+    out.autoSend = Boolean(source.autoSend);
+    if (source.buttonType === 'id' || source.buttonType === 'class') out.buttonType = source.buttonType;
+    if (typeof source.buttonValue === 'string') out.buttonValue = source.buttonValue;
+    return out;
+  }
+
+  /**
+   * Human-friendly label for a page key, e.g. "https://www.whatsapp.com" ->
+   * "www.whatsapp.com".
+   *
+   * @param {string} pageKey
+   * @returns {string}
+   */
+  function pageLabel(pageKey) {
+    if (typeof pageKey !== 'string') return '';
+    return pageKey.replace(/^https?:\/\//, '');
+  }
+
+  /**
+   * Pick the best page tab from a list of chrome tabs. Skips tabs with no
+   * usable http(s) origin (e.g. the extension's own options tab). Prefers an
+   * active tab, then the most recently accessed.
+   *
+   * @param {Array<{id?:number,url?:string,active?:boolean,lastAccessed?:number}>} tabs
+   * @returns {object|null}
+   */
+  function pickPageTab(tabs) {
+    if (!Array.isArray(tabs)) return null;
+
+    // Accept url or pendingUrl (a tab that is still loading may only expose
+    // pendingUrl in some Chrome versions).
+    const urlOf = (t) => (t && (t.url || t.pendingUrl)) || null;
+
+    const usable = tabs.filter((t) => pageKeyFromUrl(urlOf(t)) !== null);
+    if (usable.length === 0) return null;
+
+    const active = usable.find((t) => t.active);
+    if (active) return active;
+    usable.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+    return usable[0];
+  }
+
   const SelectorUtil = {
     SELECTOR_TYPES: SELECTOR_TYPES,
+    PAGE_KEY_PREFIX: PAGE_KEY_PREFIX,
+    PAGE_INDEX_KEY: PAGE_INDEX_KEY,
     normalizeType: normalizeType,
     normalizeValue: normalizeValue,
     buildSelector: buildSelector,
@@ -186,6 +289,12 @@
     shouldAutoClick: shouldAutoClick,
     composeContent: composeContent,
     buildTextareaTarget: buildTextareaTarget,
+    pageKeyFromUrl: pageKeyFromUrl,
+    pageSettingsKey: pageSettingsKey,
+    emptyPageSettings: emptyPageSettings,
+    pickPageSettings: pickPageSettings,
+    pageLabel: pageLabel,
+    pickPageTab: pickPageTab,
     shouldRun: shouldRun,
     canInject: canInject
   };

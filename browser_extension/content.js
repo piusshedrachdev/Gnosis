@@ -15,6 +15,18 @@
 (function () {
   'use strict';
 
+  // ---- Re-injection guard ----
+  // chrome.scripting.executeScript may inject this file more than once into
+  // the same page. Without this guard, each injection would re-register the
+  // onMessage listener and re-run the resume logic, so a single Start or a
+  // single extraction could be handled twice (double injection / double
+  // click). If we are already loaded, do nothing.
+  if (window.__classExtractorLoaded) {
+    console.log('[Class Extractor] content script already loaded; skipping re-init.');
+    return;
+  }
+  window.__classExtractorLoaded = true;
+
   // ---- State ----
   let running = false;
   let debounceTimer = null;
@@ -374,14 +386,31 @@
 
         if (el) {
           try {
+            const current =
+              el.tagName === 'TEXTAREA' || el.tagName === 'INPUT'
+                ? (typeof el.value === 'string' ? el.value : '')
+                : (typeof el.textContent === 'string' ? el.textContent : '');
+
+            // Idempotency guard: never write the exact same content twice.
+            // 'replace' already-present => nothing to do. 'append' already
+            // ending with the block => nothing to do. This prevents a double
+            // injection when a message is handled more than once.
+            if (mode === 'replace' && current === content) {
+              console.log('[Class Extractor] Inject skipped (replace: identical content already present).');
+              resolve(true);
+              return;
+            }
+            if (mode === 'append' && current && current.endsWith(content)) {
+              console.log('[Class Extractor] Inject skipped (append: content already present).');
+              resolve(true);
+              return;
+            }
+
             if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
               el.focus();
-              const existing = typeof el.value === 'string' ? el.value : '';
-              const finalContent = composeContent(existing, content, mode);
-              setNativeValue(el, finalContent);
+              setNativeValue(el, composeContent(current, content, mode));
             } else {
-              const existing = typeof el.textContent === 'string' ? el.textContent : '';
-              el.textContent = composeContent(existing, content, mode);
+              el.textContent = composeContent(current, content, mode);
             }
             console.log(
               `[Class Extractor] Injected ${content.length} chars (${mode}) into ${containerSelector} (${reason})`

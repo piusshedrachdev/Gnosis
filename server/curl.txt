@@ -1,0 +1,19 @@
+curl -X POST http://localhost:3000/tools/scroll \
+-H "Content-Type: application/json" \
+-d '{"arguments": {"amount":3, "direction":"up"}}'
+
+
+curl -X POST http://localhost:3000/tools/activate_app \
+-H "Content-Type: application/json" \
+-d '{"arguments":{"app":"5224"}}'
+
+
+curl -X POST http://localhost:3000/tools/get_app_state \
+-H "Content-Type: application/json" \
+-d '{"arguments":{"app":"5224"}}'
+
+curl -X POST http://localhost:3000/tools/type_text \
+-H "Content-Type: application/json" \
+-d '{"arguments":{"text":"5224"}}'
+
+

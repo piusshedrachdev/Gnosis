@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Class Value Extractor",
+  "version": "1.3",
+  "description": "Waits idle until you click Start with a source class/id to extract from and a destination class/id to inject into, then validates extracted text against the Agent Runtime /execute contract and writes the response back into the page.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "http://localhost:3000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["selector.js", "parser.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["selector.js", "parser.js", "capability_prompt.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "Class Value Extractor",
+    "default_popup": "options.html"
+  }
+}

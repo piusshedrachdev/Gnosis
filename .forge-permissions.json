@@ -1,0 +1,6 @@
+{
+  "alwaysAllow": [
+    "file_write",
+    "shell_exec"
+  ]
+}
